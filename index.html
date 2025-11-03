@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="km">
+<html lang="km" class=""> <!-- 'dark' class នឹងត្រូវបានបន្ថែមនៅទីនេះដោយ React -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -48,15 +48,49 @@
     .animate-fade-in-fast {
       animation: fadeInFast 0.2s ease-out;
     }
+    
+    /* សម្រាប់ Background Swatches */
+    .bg-swatch {
+      width: 100%;
+      height: 50px;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      border: 3px solid transparent;
+      transition: all 0.2s ease;
+    }
+    .bg-swatch.selected {
+      border-color: #2563EB; /* blue-600 */
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+    }
+    /* Dark mode support for selected border */
+    .dark .bg-swatch.selected {
+      border-color: #3B82F6; /* blue-500 */
+    }
+    
+    /* Background Patterns */
+    .bg-dots {
+      background-image: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px); /* Dark mode dots */
+    }
+    .dark .bg-dots {
+       background-image: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px);
+    }
+    .bg-gray-800-dots { /* Class សម្រាប់ Dark Mode */
+       background-color: #1f2937; /* gray-800 */
+    }
+    
+    .bg-lines {
+      background-image: linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(to right, rgba(0,0,0,0.05) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
   </style>
 </head>
-<body class="bg-gray-50">
+<body class=""> <!-- Background នឹងត្រូវបានកំណត់ដោយ React -->
   
   <div id="root"></div>
 
   <script type="text/babel">
     
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useCallback } = React;
 
     // --- Global Firebase Variables ---
     const firebaseConfig = {
@@ -69,6 +103,16 @@
       appId: "1:1032751366057:web:b23f1e7f3a093a496a4eb8",
       measurementId: "G-51RMC51XZW"
     };
+
+    // --- Background Options (UPDATED with isDark) ---
+    const backgroundOptions = [
+      { id: 'bg-gray-50', name: 'ពណ៌ប្រផេះ (Default)', class: 'bg-gray-50', isDark: false },
+      { id: 'bg-white', name: 'ពណ៌ស', class: 'bg-white', isDark: false },
+      { id: 'bg-blue-50', name: 'ពណ៌ខៀវខ្ចី', class: 'bg-blue-50', isDark: false },
+      { id: 'bg-gray-800-dots', name: 'ងងឹត (Dots)', class: 'bg-gray-800-dots bg-dots', isDark: true },
+      { id: 'bg-gray-100-lines', name: 'ប្រផេះ (Lines)', class: 'bg-gray-100 bg-lines', isDark: false },
+      { id: 'bg-indigo-50', name: 'ពណ៌ស្វាយខ្ចី', class: 'bg-indigo-50', isDark: false },
+    ];
 
     // --- Helper Function (ថ្ងៃបច្ចុប្បន្ន) ---
     const getTodayDateString = () => {
@@ -83,20 +127,17 @@
     const encodeUrlIfNeeded = (url) => {
       if (!url) return null;
       try {
-        // ពិនិត្យមើលថាតើ URL មានតួអក្សរដែលមិនមែនជា ASCII (ដូចជាអក្សរខ្មែរ)
         if (/[^\x00-\x7F]/.test(url)) {
-          // បំបែក URL ទៅជា protocol, host, និង path
           const urlObj = new URL(url);
           const protocol = urlObj.protocol;
           const host = urlObj.host;
-          // បំប្លែង (Encode) តែ phần path (ក្រោយ host)
           const path = urlObj.pathname.split('/').map(segment => encodeURIComponent(segment)).join('/');
           return `${protocol}//${host}${path}`;
         }
-        return url; // URL ធម្មតា មិនបាច់ encode
+        return url;
       } catch (e) {
         console.error("Invalid URL:", url, e);
-        return null; // បើ URL ខុស មិនបង្ហាញរូប
+        return null;
       }
     };
     
@@ -106,7 +147,7 @@
       return result.charAt(0).toUpperCase() + result.slice(1);
     };
     const formatDisplayTime = (isoString) => {
-      if (!isoString || typeof isoString !== 'string') return '--:--'; // ប្រើ --:-- ជំនួស N/A
+      if (!isoString || typeof isoString !== 'string') return '--:--';
       try {
         return new Date(isoString).toLocaleString('en-US', { 
           hour: '2-digit', minute: '2-digit', hour12: true 
@@ -131,40 +172,59 @@
       const [isAuthReady, setIsAuthReady] = useState(false);
 
       // App state
-      const [notes, setNotes] = useState([]); // រក្សាទុកទិន្នន័យ *ទាំងអស់*
+      const [notes, setNotes] = useState([]);
       const [loading, setLoading] = useState(true);
       const [error, setError] = useState(null);
 
       // --- Page Navigation State ---
-      const [page, setPage] = useState('list'); // 'list' or 'details'
+      const [page, setPage] = useState('list'); // 'list', 'details', 'settings'
 
+      // --- Settings State (UPDATED: Both personal) ---
+      const [showOnlyCheckout, setShowOnlyCheckout] = useState(false); // Personal filter
+      const [background, setBackground] = useState(backgroundOptions[0].class); // Personal background
+      
       // --- Modal State ---
-      const [modalImage, setModalImage] = useState(null); // null = hidden, string (url) = visible
+      const [modalImage, setModalImage] = useState(null);
 
       // Animation states
       const [headerAnimated, setHeaderAnimated] = useState(false);
       const [cardsAnimated, setCardsAnimated] = useState(false);
 
       // --- Pagination State ---
-      const [currentPage, setCurrentPage] = useState(0); // ទំព័របច្ចុប្បន្ន (ចាប់ពី 0)
-      const CARDS_PER_PAGE = 10; // 10 កាត ក្នុងមួយទំព័រ
+      const [currentPage, setCurrentPage] = useState(0);
+      const CARDS_PER_PAGE = 10;
 
       // --- Touch Swipe State ---
       const [touchStartX, setTouchStartX] = useState(null);
       const [touchEndX, setTouchEndX] = useState(null);
 
-      // 1. Initialize Firebase and Authenticate
+      // 1. Initialize Firebase, Authenticate, and Load Personal Settings (UPDATED)
       useEffect(() => {
+        // Load personal background from localStorage
+        const savedBgClass = localStorage.getItem('appBackground') || backgroundOptions[0].class;
+        const savedBgOption = backgroundOptions.find(o => o.class === savedBgClass) || backgroundOptions[0];
+        
+        setBackground(savedBgOption.class);
+        if (savedBgOption.isDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+
+        // Load personal filter from localStorage (NEW)
+        const savedShowOnlyCheckout = localStorage.getItem('showOnlyCheckout');
+        setShowOnlyCheckout(savedShowOnlyCheckout === 'true');
+
         try {
           if (!firebaseConfig.apiKey) throw new Error("Firebase config is missing.");
           if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
           
           const authInstance = firebase.auth();
           const dbInstance = firebase.database();
-
+          
           setDb(dbInstance);
           setAuth(authInstance);
-
+          
           setTimeout(() => setHeaderAnimated(true), 100); 
 
           const unsubscribeAuth = authInstance.onAuthStateChanged(async (user) => {
@@ -190,14 +250,15 @@
         }
       }, []);
 
-      // 2. Read Data from Realtime Database (v8 API)
+      // 2. Read Data from Realtime Database (UPDATED: Removed settings listener)
       useEffect(() => {
-        if (!isAuthReady || !db || !userId) return;
+        if (!isAuthReady || !db || !userId) return; 
 
         setLoading(true);
         setError(null);
-        setCardsAnimated(false); // បិទ Animation សិន
+        setCardsAnimated(false);
 
+        // --- Listen for Attendance Data ---
         const todayString = getTodayDateString();
         const todayQuery = db.ref('attendance').orderByChild('date').equalTo(todayString);
 
@@ -214,7 +275,6 @@
             });
           }
 
-          // តម្រៀបទិន្នន័យ (Sort) តាម CheckOutTime ពីថ្មីទៅចាស់
           fetchedNotes.sort((a, b) => {
             const timeA = a.data.checkOutTime ? new Date(a.data.checkOutTime) : new Date(0);
             const timeB = b.data.checkOutTime ? new Date(b.data.checkOutTime) : new Date(0);
@@ -223,8 +283,8 @@
 
           setNotes(data === null ? [] : fetchedNotes);
           setLoading(false);
-          setCurrentPage(0); // ត្រឡប់ទៅទំព័រទី 1 ពេលទិន្នន័យថ្មីចូល
-          setTimeout(() => setCardsAnimated(true), 100); // បើក Animation វិញ
+          setCurrentPage(0);
+          setTimeout(() => setCardsAnimated(true), 100);
         };
         
         const onErrorCallback = (err) => {
@@ -233,17 +293,56 @@
           setLoading(false);
         };
 
-        // .on() គឺ Realtime
         todayQuery.on('value', onValueCallback, onErrorCallback);
         
-        // ពេល Component បិទ ត្រូវផ្តាច់ .off()
-        return () => todayQuery.off('value', onValueCallback);
-      }, [db, userId, isAuthReady]);
+        return () => {
+          todayQuery.off('value', onValueCallback);
+        };
+      }, [db, userId, isAuthReady]); 
 
-      // --- Pagination Logic ---
-      const totalPages = Math.ceil(notes.length / CARDS_PER_PAGE);
-      // ទាញយកតែទិន្នន័យសម្រាប់ទំព័របច្ចុប្បន្ន
-      const currentNotes = notes.slice(
+      // 3. Save Personal Background & Toggle Dark Mode (UPDATED)
+      const handleBackgroundChange = (bgClass) => {
+        const selectedOption = backgroundOptions.find(o => o.class === bgClass) || backgroundOptions[0];
+        
+        localStorage.setItem('appBackground', selectedOption.class);
+        setBackground(selectedOption.class);
+        
+        // Toggle Dark Mode
+        if (selectedOption.isDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+        // Apply to body tag for full page effect
+        document.body.className = selectedOption.class;
+      };
+
+      // Apply body class on initial load
+      useEffect(() => {
+        document.body.className = background;
+      }, [background]);
+
+
+      // --- Personal Setting Write Function (UPDATED) ---
+      const handleFilterToggle = () => {
+        const newValue = !showOnlyCheckout;
+        localStorage.setItem('showOnlyCheckout', newValue); // Save to localStorage
+        setShowOnlyCheckout(newValue); // Update state
+      };
+
+      // --- Filtered Notes Logic (for List Page) ---
+      const filteredNotes = useMemo(() => {
+        if (!showOnlyCheckout) {
+          return notes; // If filter is off, return all notes
+        }
+        // If filter is on, return only notes WITHOUT a checkInTime
+        return notes.filter(note => !note.data.checkInTime);
+      }, [notes, showOnlyCheckout]);
+
+
+      // --- Pagination Logic (uses filteredNotes) ---
+      const totalPages = Math.ceil(filteredNotes.length / CARDS_PER_PAGE);
+      const currentNotes = filteredNotes.slice(
         currentPage * CARDS_PER_PAGE,
         (currentPage + 1) * CARDS_PER_PAGE
       );
@@ -251,11 +350,11 @@
       const goToPage = (pageIndex) => {
         if (pageIndex < 0 || pageIndex >= totalPages) return;
         
-        setCardsAnimated(false); // បិទ Animation
+        setCardsAnimated(false);
         setTimeout(() => {
           setCurrentPage(pageIndex);
-          setCardsAnimated(true); // បើក Animation សម្រាប់ Card ថ្មី
-        }, 150); // ទុកពេលឱ្យ Card ចាស់បាត់
+          setCardsAnimated(true);
+        }, 150);
       };
 
       const handlePrevPage = () => goToPage(currentPage - 1);
@@ -263,32 +362,30 @@
 
       // --- Touch Swipe Handlers ---
       const handleTouchStart = (e) => {
-        if (page !== 'list') return; // អនុញ្ញាតឱ្យអូសបានតែលើទំព័រ 'list'
-        setTouchEndX(null); // Reset
+        if (page !== 'list') return;
+        setTouchEndX(null);
         setTouchStartX(e.targetTouches[0].clientX);
       };
-
       const handleTouchMove = (e) => {
         if (page !== 'list') return;
         setTouchEndX(e.targetTouches[0].clientX);
       };
-
       const handleTouchEnd = () => {
         if (page !== 'list') return;
         if (!touchStartX || !touchEndX) return;
         const diff = touchStartX - touchEndX;
-        const swipeThreshold = 50; // ត្រូវអូសយ៉ាងតិច 50px
+        const swipeThreshold = 50; 
 
         if (diff > swipeThreshold) {
-          handleNextPage(); // អូសទៅឆ្វេង (ទៅទំព័របន្ទាប់)
+          handleNextPage();
         } else if (diff < -swipeThreshold) {
-          handlePrevPage(); // អូសទៅស្តាំ (ទៅទំព័រមុន)
+          handlePrevPage();
         }
-        setTouchStartX(null); // Reset
+        setTouchStartX(null);
         setTouchEndX(null);
       };
 
-      // --- Calculations for Details Page ---
+      // --- Calculations for Details Page (uses all 'notes') ---
       const stats = useMemo(() => {
         if (loading || notes.length === 0) {
           return { totalStudents: 0, studentsOut: 0, totalRecords: 0 };
@@ -331,14 +428,117 @@
 
       const handleShareToTelegram = () => {
         const text = formatForShare();
-        // ប្រើ window.open សម្រាប់ tg:// protocol
         const telegramUrl = `tg://msg_url?text=${encodeURIComponent(text)}`;
         window.open(telegramUrl, '_blank');
       };
 
+      // --- Render UI (JSX) ---
+      return (
+        <React.Fragment>
+          {/* Main container class is now dynamic from state */}
+          <div className={`flex flex-col h-screen font-sans overflow-hidden transition-colors duration-300 ${background} dark:text-gray-200`}>
+            
+            {/* Header Bar */}
+            <div className={`w-full bg-gradient-to-r from-blue-600 to-indigo-700 shadow-lg relative z-10 flex-shrink-0 transition-all duration-700 ease-out transform ${
+                headerAnimated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-12'
+              }`}>
+              <div className="w-full max-w-3xl mx-auto p-5 flex flex-row items-center justify-center"> {/* Justify-center */}
+                
+                {/* ចំណងជើង (នៅកណ្តាល) */}
+                <div className="flex flex-row items-center justify-center space-x-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-white opacity-90">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h1 className="text-2xl font-bold text-white text-center">
+                    {page === 'list' && 'និស្សិតចេញចូលម៉ោងការងារ'}
+                    {page === 'details' && 'សរុបប្រចាំថ្ងៃ'}
+                    {page === 'settings' && 'ការកំណត់'}
+                  </h1>
+                </div>
 
-      // --- Sub-Component: List Page ---
-      const ListPage = () => (
+              </div>
+            </div>
+
+            {/* Main Content Area (Scrollable) */}
+            <div className="w-full max-w-3xl mx-auto p-4 flex-grow overflow-y-auto pb-24"> {/* Added pb-24 for footer space */}
+              
+              {error && (
+                <div className="p-4 my-4 text-center text-red-800 bg-red-100 rounded-lg shadow">
+                  <span className="font-semibold">មានបញ្ហា៖</span> {error}
+                </div>
+              )}
+
+              {/* ប្រើ currentNotes សម្រាប់ ListPage (ដែលបានត្រង (Filter) រួច) */}
+              {page === 'list' && <ListPage loading={loading} notes={currentNotes} totalPages={totalPages} currentPage={currentPage} handlePrevPage={handlePrevPage} handleNextPage={handleNextPage} handleTouchStart={handleTouchStart} handleTouchMove={handleTouchMove} handleTouchEnd={handleTouchEnd} cardsAnimated={cardsAnimated} setModalImage={setModalImage} />}
+              
+              {page === 'details' && <DetailsPage loading={loading} stats={stats} handleShareToTelegram={handleShareToTelegram} />}
+              
+              {page === 'settings' && <SettingsPage showOnlyCheckout={showOnlyCheckout} onFilterToggle={handleFilterToggle} currentBackground={background} onBackgroundChange={handleBackgroundChange} />}
+
+            </div>
+
+            {/* === Footer Navigation Bar (NEW) === */}
+            <div className="w-full bg-white dark:bg-gray-800 shadow-inner sticky bottom-0 z-10 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+              <div className="w-full max-w-3xl mx-auto px-4 py-2 flex justify-around items-center">
+                
+                {/* Nav Item: List */}
+                <button
+                  onClick={() => setPage('list')}
+                  className={`flex flex-col items-center justify-center w-full p-2 rounded-lg transition-colors ${
+                    page === 'list' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={page === 'list' ? 2 : 1.5} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h7.5M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                  </svg>
+                  <span className="text-xs font-medium mt-1">បញ្ជី</span>
+                </button>
+
+                {/* Nav Item: Details */}
+                <button
+                  onClick={() => setPage('details')}
+                  className={`flex flex-col items-center justify-center w-full p-2 rounded-lg transition-colors ${
+                    page === 'details' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={page === 'details' ? 2 : 1.5} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V5.75A2.25 2.25 0 0018 3.5H6A2.25 2.25 0 003.75 5.75v12.5A2.25 2.25 0 006 20.25z" />
+                  </svg>
+                  <span className="text-xs font-medium mt-1">សរុប</span>
+                </button>
+
+                {/* Nav Item: Settings */}
+                <button
+                  onClick={() => setPage('settings')}
+                  className={`flex flex-col items-center justify-center w-full p-2 rounded-lg transition-colors ${
+                    page === 'settings' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={page === 'settings' ? 2 : 1.5} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-1.007 1.11-1.227l-.11.023c.554-.22 1.156-.22 1.71 0l.11-.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554.22 1.156.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554.22 1.156.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554.22 1.156.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023a8.25 8.25 0 00-2.4 0l.11.023a1.125 1.125 0 01-1.227 1.11l-.023-.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023-.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227 1.11l-.023-.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023-.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 000-2.4l.023.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11a8.25 8.25 0 000-2.4l.023.11C9.323 4.625 9.793 4.16 10.343 3.94zM12 15a3 3 0 100-6 3 3 0 000 6z" />
+                  </svg>
+                  <span className="text-xs font-medium mt-1">កំណត់ត្រា</span>
+                </button>
+                
+              </div>
+            </div>
+
+          </div>
+
+          {/* === Modal Container === */}
+          {modalImage && (
+            <ImageModal 
+              imageUrl={modalImage} 
+              onClose={() => setModalImage(null)} 
+            />
+          )}
+        </React.Fragment>
+      );
+    }
+
+    // --- Sub-Component: List Page ---
+    function ListPage({ loading, notes, totalPages, currentPage, handlePrevPage, handleNextPage, handleTouchStart, handleTouchMove, handleTouchEnd, cardsAnimated, setModalImage }) {
+      return (
         <React.Fragment>
           {/* Card List Container (with swipe handlers) */}
           <div 
@@ -351,15 +551,14 @@
               <div className="flex justify-center items-center py-10">
                 <svg className="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8
-0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <span className="ml-3 text-gray-600">កំពុងទាញយកទិន្នន័យ...</span>
+                <span className="ml-3 text-gray-600 dark:text-gray-300">កំពុងទាញយកទិន្នន័យ...</span>
               </div>
             )}
             
             {!loading && notes.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-10 text-center text-gray-500">
+              <div className="flex flex-col items-center justify-center py-10 text-center text-gray-500 dark:text-gray-400">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-gray-400">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
@@ -368,25 +567,20 @@
               </div>
             )}
 
-            {/* ប្រើ currentNotes ជំនួស notes */}
-            {!loading && currentNotes.map((note, index) => {
+            {!loading && notes.map((note, index) => {
               
-              // *** កំណត់ field ដែលត្រូវលាក់ ចេញពី "ព័ត៌មានផ្សេងៗ" ***
               const knownFields = new Set([
                 'studentId', 'passNumber', 'checkInTime', 'checkOutTime', 'date', 'breakType', 
-                'studentName', 'name', 'photoURL', 'imageUrl', 'Student Photo Url', 'studentPhotoUrl' // បានបន្ថែម 'studentPhotoUrl'
+                'studentName', 'name', 'photoURL', 'imageUrl', 'Student Photo Url', 'studentPhotoUrl'
               ]);
               
               const { data } = note;
               
-              // កំណត់តម្លៃសម្រាប់បង្ហាញ
               const displayName = data.studentName || data.name;
-              // *** ប្រើ function 'encodeUrlIfNeeded' ***
               const displayPhoto = encodeUrlIfNeeded(data['Student Photo Url'] || data.studentPhotoUrl || data.photoURL || data.imageUrl);
 
-              // *** ត្រង (Filter) យកតែ field ដែលមិនស្គាល់ ***
               const otherData = Object.keys(data)
-                .filter(key => !knownFields.has(key) && data[key]) // លក្ខខណ្ឌថ្មី
+                .filter(key => !knownFields.has(key) && data[key])
                 .reduce((obj, key) => {
                   obj[key] = data[key];
                   return obj;
@@ -395,24 +589,22 @@
               return (
                 <div
                   key={note.id}
-                  className={`bg-white rounded-xl shadow-md overflow-hidden transition-all duration-500 ease-out transform hover:-translate-y-1 hover:shadow-xl ${
+                  className={`bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden transition-all duration-500 ease-out transform hover:-translate-y-1 hover:shadow-xl dark:shadow-gray-900 dark:hover:shadow-gray-700 ${
                     cardsAnimated 
                       ? 'opacity-100 translate-y-0 scale-100' 
                       : 'opacity-0 translate-y-5 scale-95'
                   } ${
-                    displayPhoto ? 'cursor-pointer' : '' // Add cursor-pointer if photo exists
+                    displayPhoto ? 'cursor-pointer' : ''
                   }`}
-                  style={{ transitionDelay: `${index * 100}ms` }} // Animation ចូលម្តងមួយៗ
+                  style={{ transitionDelay: `${index * 100}ms` }}
                   onClick={() => {
                     if (displayPhoto) {
-                      setModalImage(displayPhoto); // Open modal on click
+                      setModalImage(displayPhoto);
                     }
                   }}
                 >
                   {/* === Card Header === */}
-                  <div className="p-4 bg-gray-50 border-b border-gray-200 relative">
-                    
-                    {/* Pass Number Badge (លេខកាត) */}
+                  <div className="p-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 relative">
                     {data.passNumber && (
                       <div className="absolute top-4 right-4 flex items-center space-x-1.5 bg-blue-600 text-white px-3 py-1 rounded-full shadow-md text-xs font-bold">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
@@ -421,11 +613,8 @@
                         <span>{data.passNumber}</span>
                       </div>
                     )}
-
-                    {/* ព័ត៌មាននិស្សិត (រូបថត, ឈ្មោះ, ID) */}
                     <div className="flex items-center space-x-3">
-                      {/* រូបថត (ឬ Icon) */}
-                      <div className="flex-shrink-0 w-12 h-12 rounded-full overflow-hidden bg-blue-100 flex items-center justify-center">
+                      <div className="flex-shrink-0 w-12 h-12 rounded-full overflow-hidden bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
                         {displayPhoto ? (
                           <img 
                             src={displayPhoto} 
@@ -433,95 +622,79 @@
                             className="w-full h-full object-cover" 
                             referrerPolicy="no-referrer" 
                             onError={(e) => {
-                              // Fallback ពេលរូប Error
                               e.target.style.display = 'none'; 
                               e.target.nextSibling.style.display = 'flex';
                             }} 
                           />
                         ) : null}
-                        
-                        {/* Icon មនុស្ស (ប្រសិនបើគ្មានរូបថត ឬ រូបថត Error) */}
                         <div 
                           className="w-full h-full flex items-center justify-center" 
                           style={{ display: displayPhoto ? 'none' : 'flex' }}
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-blue-600">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-blue-600 dark:text-blue-300">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
                         </div>
                       </div>
-                      
-                      {/* ឈ្មោះ និង ID */}
                       <div>
-                        <div className="text-lg font-bold text-gray-900">{displayName || 'មិនមានឈ្មោះ'}</div>
-                        <div className="text-sm font-semibold text-gray-500">ID: {data.studentId || 'N/A'}</div>
+                        <div className="text-lg font-bold text-gray-900 dark:text-white">{displayName || 'មិនមានឈ្មោះ'}</div>
+                        <div className="text-sm font-semibold text-gray-500 dark:text-gray-400">ID: {data.studentId || 'N/A'}</div>
                       </div>
                     </div>
-                    
                   </div>
 
                   {/* === Card Body === */}
                   <div className="p-4">
-                    {/* ជួរទី 1: ម៉ោងចេញ និង ម៉ោងចូល */}
                     <div className="flex justify-between items-center">
-                      
-                      {/* ម៉ោងចេញ */}
                       <div className="flex items-center space-x-2">
-                        <div className="flex-shrink-0 p-2 bg-red-100 rounded-full">
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-red-600">
+                        <div className="flex-shrink-0 p-2 bg-red-100 dark:bg-red-900/50 rounded-full">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-red-600 dark:text-red-400">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m-3 0l3-3m0 0l-3-3m3 3H9" />
                           </svg>
                         </div>
                         <div className="text-left">
-                          <div className="text-xs font-medium text-gray-500">ម៉ោងចេញ</div>
-                          <div className="text-base font-bold text-gray-900">{formatDisplayTime(data.checkOutTime)}</div>
+                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400">ម៉ោងចេញ</div>
+                          <div className="text-base font-bold text-gray-900 dark:text-white">{formatDisplayTime(data.checkOutTime)}</div>
                         </div>
                       </div>
-
-                      <div className="flex-grow border-t-2 border-dotted border-gray-300 mx-3"></div>
-
-                      {/* ម៉ោងចូល */}
+                      <div className="flex-grow border-t-2 border-dotted border-gray-300 dark:border-gray-600 mx-3"></div>
                       <div className="flex items-center space-x-2">
                         <div className="text-right">
-                          <div className="text-xs font-medium text-gray-500">ម៉ោងចូល</div>
-                          <div className="text-base font-bold text-gray-900">{formatDisplayTime(data.checkInTime)}</div>
+                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400">ម៉ោងចូល</div>
+                          <div className="text-base font-bold text-gray-900 dark:text-white">{formatDisplayTime(data.checkInTime)}</div>
                         </div>
-                        <div className="flex-shrink-0 p-2 bg-green-100 rounded-full">
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-green-600">
+                        <div className="flex-shrink-0 p-2 bg-green-100 dark:bg-green-900/50 rounded-full">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-green-600 dark:text-green-400">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M15.75 9l-2.25-2.25m0 0l-2.25 2.25M13.5 6.75v10.5" />
                           </svg>
                         </div>
                       </div>
                     </div>
-
-                    {/* ជួរទី 2: ព័ត៌មានបន្ទាប់បន្សំ */}
-                    <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100 text-xs">
-                      <div className="flex items-center space-x-2 text-gray-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-yellow-600 flex-shrink-0">
+                    <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 text-xs">
+                      <div className="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-yellow-600 dark:text-yellow-500 flex-shrink-0">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
                         </svg>
                         <span className="capitalize">{data.breakType || 'N/A'}</span>
                       </div>
-                      <div className="flex items-center space-x-2 text-gray-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-indigo-500 flex-shrink-0">
+                      <div className="flex items-center space-x-2 text-gray-500 dark:text-gray-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-indigo-500 dark:text-indigo-400 flex-shrink-0">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                         </svg>
                         <span>{formatDisplayDate(data.date)}</span>
                       </div>
                     </div>
-
-                    {/* ព័ត៌មានផ្សេងៗ (បើមាន) */}
                     {Object.keys(otherData).length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-gray-100 space-y-2 text-xs">
+                      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-2 text-xs">
                         {Object.entries(otherData).map(([key, value]) => (
                           <div className="flex items-center space-x-2" key={key}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-gray-400 flex-shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                             </svg>
                             <div>
-                              <div className="font-medium text-gray-500">{formatKey(key)}</div>
-                              <div className="text-gray-900 break-words">{String(value)}</div>
+                              <div className="font-medium text-gray-500 dark:text-gray-400">{formatKey(key)}</div>
+                              <div className="text-gray-900 dark:text-white break-words">{String(value)}</div>
                             </div>
                           </div>
                         ))}
@@ -539,7 +712,7 @@
               <button
                 onClick={handlePrevPage}
                 disabled={currentPage === 0}
-                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -547,14 +720,14 @@
                 ថយក្រោយ
               </button>
               
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                 ទំព័រទី {currentPage + 1} នៃ {totalPages}
               </span>
 
               <button
                 onClick={handleNextPage}
                 disabled={currentPage >= totalPages - 1}
-                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 បន្ទាប់
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 ml-2">
@@ -565,11 +738,13 @@
           )}
         </React.Fragment>
       );
+    }
 
-      // --- Sub-Component: Details Page ---
-      const DetailsPage = () => (
+    // --- Sub-Component: Details Page ---
+    function DetailsPage({ loading, stats, handleShareToTelegram }) {
+      return (
         <div className="space-y-4 animate-fade-in">
-          <h2 className="text-xl font-bold text-gray-800 text-center mb-6">សរុបប្រចាំថ្ងៃ</h2>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 text-center mb-6">សរុបប្រចាំថ្ងៃ</h2>
           
           {loading ? (
              <div className="flex justify-center items-center py-10">
@@ -581,7 +756,6 @@
           ) : (
             <div className="space-y-4">
               
-              {/* Stat Card 1: Students Out (Primary) */}
               <div className="relative bg-gradient-to-br from-red-500 to-pink-600 p-6 rounded-2xl shadow-lg overflow-hidden text-white">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="absolute top-4 right-4 w-20 h-20 text-white opacity-20 transform -rotate-12">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m-3 0l3-3m0 0l-3-3m3 3H9" />
@@ -593,10 +767,7 @@
                 </div>
               </div>
 
-              {/* Secondary Stats Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                
-                {/* Stat Card 2: Total Students */}
                 <div className="relative bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-2xl shadow-lg overflow-hidden text-white">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="absolute bottom-2 right-2 w-16 h-16 text-white opacity-20">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m-4.682 2.72a.75.75 0 01-.058-.867 3 3 0 012.227-1.323 3 3 0 012.227 1.323.75.75 0 01-.058.867M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
@@ -609,8 +780,6 @@
                     <div className="text-sm opacity-90">(Unique)</div>
                   </div>
                 </div>
-
-                {/* Stat Card 3: Total Records */}
                 <div className="relative bg-gradient-to-br from-indigo-600 to-blue-700 p-6 rounded-2xl shadow-lg overflow-hidden text-white">
                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="absolute bottom-2 right-2 w-16 h-16 text-white opacity-20">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
@@ -624,13 +793,10 @@
               </div>
 
               {/* === Export Section (RE-DESIGNED & CLEANED) === */}
-              <div className="mt-8 pt-6 border-t border-gray-200 space-y-6">
-                
-                {/* ផ្នែក "ចែករំលែក" */}
+              <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-700 mb-3">ចែករំលែកទៅ Telegram</h3>
+                  <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200 mb-3">ចែករំលែកទៅ Telegram</h3>
                   <div className="grid grid-cols-1 gap-3">
-                    {/* Telegram Text Button */}
                     <button
                       onClick={handleShareToTelegram}
                       className="flex items-center justify-center space-x-2 w-full px-4 py-3 bg-blue-500 text-white rounded-lg shadow-md hover:bg-blue-600 transition-colors"
@@ -642,97 +808,84 @@
                     </button>
                   </div>
                 </div>
-
               </div>
             </div>
           )}
         </div>
       );
-
-      // --- Render UI (JSX) ---
+    }
+    
+    // --- Sub-Component: Settings Page (UPDATED: Merged into one box) ---
+    function SettingsPage({ showOnlyCheckout, onFilterToggle, currentBackground, onBackgroundChange }) {
+      
+      const Switch = ({ label, description, enabled, onToggle }) => (
+        <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div className="flex-grow mr-4">
+            <div className="text-base font-medium text-gray-900 dark:text-white">{label}</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{description}</div>
+          </div>
+          <button
+            onClick={onToggle}
+            className={`relative inline-flex items-center h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+              enabled ? 'bg-blue-600' : 'bg-gray-200'
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                enabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      );
+      
       return (
-        <React.Fragment>
-          <div className="flex flex-col items-center justify-start min-h-screen bg-gray-50 font-sans overflow-x-hidden">
+        <div className="space-y-6 animate-fade-in">
+          
+          {/* Personal Settings */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+            <div className="p-4 border-b dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">ការកំណត់ផ្ទាល់ខ្លួន</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">ការកំណត់ទាំងនេះ នឹងរក្សាទុកតែនៅលើឧបករណ៍របស់អ្នកប៉ុណ្ណោះ។</p>
+            </div>
             
-            {/* Header Bar */}
-            <div className={`w-full bg-gradient-to-r from-blue-600 to-indigo-700 shadow-lg sticky top-0 z-10 transition-all duration-700 ease-out transform ${
-                headerAnimated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-12'
-              }`}>
-              <div className="w-full max-w-3xl mx-auto p-5 flex flex-row items-center justify-between">
-                
-                {/* ប៊ូតុងនៅខាងឆ្វេង (សម្រាប់ Back) */}
-                <div className="w-10">
-                  {page === 'details' && (
-                    <button 
-                      onClick={() => setPage('list')} 
-                      className="text-white p-2 rounded-full hover:bg-white/20 transition-colors"
-                      title="ថយក្រោយ"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+            {/* Filter Setting */}
+            <div className="p-4 border-b dark:border-gray-700">
+              <h4 className="text-base font-medium text-gray-900 dark:text-white mb-3">ការបង្ហាញទិន្នន័យ</h4>
+              <Switch
+                label="បង្ហាញតែនិស្សិតនៅខាងក្រៅ"
+                description="បើកមុខងារនេះ ដើម្បីបង្ហាញតែនិស្សិតដែល Check Out (មិនទាន់ Check In) នៅលើទំព័រដើម។"
+                enabled={showOnlyCheckout}
+                onToggle={onFilterToggle}
+              />
+            </div>
 
-                {/* ចំណងជើង (នៅកណ្តាល) */}
-                <div className="flex flex-row items-center justify-center space-x-3">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-white opacity-90">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h1 className="text-2xl font-bold text-white text-center">
-                    និស្សិតចេញចូលម៉ោងការងារ
-                  </h1>
-                </div>
-
-                {/* ប៊ូតុងនៅខាងស្តាំ (សម្រាប់ Details) */}
-                <div className="w-10">
-                  {page === 'list' && (
-                    <button 
-                      onClick={() => setPage('details')}
-                      className="text-white p-2 rounded-full hover:bg-white/20 transition-colors"
-                      title="មើលព័ត៌មានលម្អិត"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V5.75A2.25 2.25 0 0018 3.5H6A2.25 2.25 0 003.75 5.75v12.5A2.25 2.25 0 006 20.25z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-
+            {/* Background Setting */}
+            <div className="p-4">
+              <h4 className="text-base font-medium text-gray-900 dark:text-white mb-3">ប្តូរផ្ទៃខាងក្រោយ (Background)</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {backgroundOptions.map(option => (
+                  <div 
+                    key={option.id}
+                    onClick={() => onBackgroundChange(option.class)}
+                  >
+                    <div 
+                      className={`bg-swatch ${option.class} ${currentBackground === option.class ? 'selected' : ''}`}
+                    ></div>
+                    <div className="text-center text-sm text-gray-600 dark:text-gray-300 mt-1">{option.name}</div>
+                  </div>
+                ))}
               </div>
             </div>
-
-            {/* Main Content Area (បង្ហាញទំព័រតាមលក្ខខណ្ឌ) */}
-            <div className="w-full max-w-3xl mx-auto p-4 flex-grow">
-              
-              {error && (
-                <div className="p-4 my-4 text-center text-red-800 bg-red-100 rounded-lg shadow">
-                  <span className="font-semibold">មានបញ្ហា៖</span> {error}
-                </div>
-              )}
-
-              {page === 'list' && <ListPage />}
-              {page === 'details' && <DetailsPage />}
-
-            </div>
           </div>
-
-          {/* === Modal Container === */}
-          {modalImage && (
-            <ImageModal 
-              imageUrl={modalImage} 
-              onClose={() => setModalImage(null)} 
-            />
-          )}
-        </React.Fragment>
+          
+        </div>
       );
     }
 
     // --- Sub-Component: Image Modal ---
     function ImageModal({ imageUrl, onClose }) {
       useEffect(() => {
-        // បិទ Scroll ពេល Modal បើក
         document.body.style.overflow = 'hidden';
         return () => {
           document.body.style.overflow = 'auto';
@@ -742,29 +895,25 @@
       return (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fade-in-fast"
-          onClick={onClose} // Close on backdrop click
+          onClick={onClose}
         >
-          {/* Modal Content (stop propagation) */}
           <div 
-            className="relative bg-white rounded-lg shadow-2xl p-4 max-w-md w-full" /* CHANGED: max-w-lg to max-w-md */
-            onClick={(e) => e.stopPropagation()} // Don't close when clicking image/modal
+            className="relative bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-4 max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
           >
-            {/* Close Button */}
             <button
               onClick={onClose}
-              className="absolute -top-4 -right-4 z-10 p-2 bg-white rounded-full text-gray-700 hover:bg-gray-200 transition-colors shadow-lg"
+              className="absolute -top-4 -right-4 z-10 p-2 bg-white dark:bg-gray-700 dark:text-gray-200 rounded-full text-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shadow-lg"
               title="បិទ"
             >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            
-            {/* Image */}
             <img 
               src={imageUrl} 
               alt="រូបថតនិស្សិត" 
-              className="w-full h-auto object-contain rounded-md max-h-[70vh]" /* CHANGED: max-h-[80vh] to max-h-[70vh] */
+              className="w-full h-auto object-contain rounded-md max-h-[70vh]"
               referrerPolicy="no-referrer"
             />
           </div>
