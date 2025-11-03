@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>កំណត់ត្រានិស្សិត - Firebase Reader</title>
+  
+  <!-- បានបន្ថែម Favicon តាមការស្នើសុំ -->
+  <link rel="shortcut icon" href="https://i.postimg.cc/FHBn0Fdf/di3-copy.png" type="image/x-icon">
+  
+  <!-- 1. TALLWIND CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 2. REACT LIBRARIES -->
+  <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
+  
+  <!-- 3. BABEL STANDALONE -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- 4. FIREBASE LIBRARIES (v8 API) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <style>
+    /* បន្ថែម Font ខ្មែរ ដើម្បីឲ្យស្អាត */
+    @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;700&display=swap');
+    body {
+      font-family: 'Kantumruy Pro', sans-serif;
+    }
+    /* ការពារការប្តូរទំព័រពេលកំពុងអូស Card */
+    .card-container {
+      touch-action: pan-y;
+    }
+  </style>
+</head>
+<body class="bg-gray-50">
+  
+  <div id="root"></div>
+
+  <script type="text/babel">
+    
+    const { useState, useEffect } = React;
+
+    // --- Global Firebase Variables ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyA1YBg1h5PAxu3vB7yKkpcirHRmLVl_VMI",
+      authDomain: "brakelist-5f07f.firebaseapp.com",
+      databaseURL: "https://brakelist-5f07f-default-rtdb.firebaseio.com",
+      projectId: "brakelist-5f07f",
+      storageBucket: "brakelist-5f07f.firebasestorage.app",
+      messagingSenderId: "1032751366057",
+      appId: "1:1032751366057:web:b23f1e7f3a093a496a4eb8",
+      measurementId: "G-51RMC51XZW"
+    };
+
+    // --- Helper Function (ថ្ងៃបច្ចុប្បន្ន) ---
+    const getTodayDateString = () => {
+      const today = new Date(); 
+      const year = today.getFullYear();
+      const month = (today.getMonth() + 1).toString().padStart(2, '0');
+      const day = today.getDate().toString().padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // --- Main App Component ---
+    function App() {
+      // Firebase state
+      const [db, setDb] = useState(null);
+      const [auth, setAuth] = useState(null);
+      const [userId, setUserId] = useState(null);
+      const [isAuthReady, setIsAuthReady] = useState(false);
+
+      // App state
+      const [notes, setNotes] = useState([]); // រក្សាទុកទិន្នន័យ *ទាំងអស់*
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      // Animation states
+      const [headerAnimated, setHeaderAnimated] = useState(false);
+      const [cardsAnimated, setCardsAnimated] = useState(false);
+
+      // --- Pagination State ---
+      const [currentPage, setCurrentPage] = useState(0); // ទំព័របច្ចុប្បន្ន (ចាប់ពី 0)
+      const CARDS_PER_PAGE = 10; // 10 កាត ក្នុងមួយទំព័រ
+
+      // --- Touch Swipe State ---
+      const [touchStartX, setTouchStartX] = useState(null);
+      const [touchEndX, setTouchEndX] = useState(null);
+
+      // 1. Initialize Firebase and Authenticate
+      useEffect(() => {
+        try {
+          if (!firebaseConfig.apiKey) throw new Error("Firebase config is missing.");
+          if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+          
+          const authInstance = firebase.auth();
+          const dbInstance = firebase.database();
+
+          setDb(dbInstance);
+          setAuth(authInstance);
+
+          setTimeout(() => setHeaderAnimated(true), 100); 
+
+          const unsubscribeAuth = authInstance.onAuthStateChanged(async (user) => {
+            if (user) {
+              setUserId(user.uid);
+              setIsAuthReady(true);
+            } else {
+              try {
+                await authInstance.signInAnonymously();
+              } catch (authError) {
+                console.error("Error signing in:", authError);
+                setError("បរាជ័យក្នុងការផ្ទៀងផ្ទាត់អត្តសញ្ញាណ។");
+                setIsAuthReady(true);
+              }
+            }
+          });
+          return () => unsubscribeAuth();
+        } catch (e) {
+          console.error("Error initializing Firebase:", e);
+          setError("បរាជ័យក្នុងការចាប់ផ្តើម Firebase។");
+          setLoading(false);
+          setIsAuthReady(true);
+        }
+      }, []);
+
+      // 2. Read Data from Realtime Database (v8 API)
+      useEffect(() => {
+        if (!isAuthReady || !db || !userId) return;
+
+        setLoading(true);
+        setError(null);
+        setCardsAnimated(false); // បិទ Animation សិន
+
+        const todayString = getTodayDateString();
+        const todayQuery = db.ref('attendance').orderByChild('date').equalTo(todayString);
+
+        const onValueCallback = (snapshot) => {
+          const data = snapshot.val();
+          const fetchedNotes = [];
+
+          if (data) {
+            Object.keys(data).forEach(key => {
+              const value = data[key];
+              if (typeof value === 'object' && value !== null) {
+                fetchedNotes.push({ id: key, data: value });
+              } 
+            });
+          }
+
+          // តម្រៀបទិន្នន័យ (Sort) តាម CheckInTime ពីថ្មីទៅចាស់ (Optional but recommended)
+          fetchedNotes.sort((a, b) => 
+            new Date(b.data.checkInTime) - new Date(a.data.checkInTime)
+          );
+
+          setNotes(data === null ? [] : fetchedNotes);
+          setLoading(false);
+          setCurrentPage(0); // ត្រឡប់ទៅទំព័រទី 1 ពេលទិន្នន័យថ្មីចូល
+          setTimeout(() => setCardsAnimated(true), 100); // បើក Animation វិញ
+        };
+        
+        const onErrorCallback = (err) => {
+          console.error("Error fetching data:", err);
+          setError("បរាជ័យក្នុងការទាញយកទិន្នន័យ។");
+          setLoading(false);
+        };
+
+        todayQuery.on('value', onValueCallback, onErrorCallback);
+        return () => todayQuery.off('value', onValueCallback);
+      }, [db, userId, isAuthReady]);
+
+      // --- Pagination Logic ---
+      const totalPages = Math.ceil(notes.length / CARDS_PER_PAGE);
+      // ទាញយកតែទិន្នន័យសម្រាប់ទំព័របច្ចុប្បន្ន
+      const currentNotes = notes.slice(
+        currentPage * CARDS_PER_PAGE,
+        (currentPage + 1) * CARDS_PER_PAGE
+      );
+
+      const goToPage = (pageIndex) => {
+        if (pageIndex < 0 || pageIndex >= totalPages) return;
+        
+        setCardsAnimated(false); // បិទ Animation
+        setTimeout(() => {
+          setCurrentPage(pageIndex);
+          setCardsAnimated(true); // បើក Animation សម្រាប់ Card ថ្មី
+        }, 150); // ទុកពេលឱ្យ Card ចាស់បាត់
+      };
+
+      const handlePrevPage = () => goToPage(currentPage - 1);
+      const handleNextPage = () => goToPage(currentPage + 1);
+
+      // --- Touch Swipe Handlers ---
+      const handleTouchStart = (e) => {
+        setTouchEndX(null); // Reset
+        setTouchStartX(e.targetTouches[0].clientX);
+      };
+
+      const handleTouchMove = (e) => {
+        setTouchEndX(e.targetTouches[0].clientX);
+      };
+
+      const handleTouchEnd = () => {
+        if (!touchStartX || !touchEndX) return;
+        const diff = touchStartX - touchEndX;
+        const swipeThreshold = 50; // ត្រូវអូសយ៉ាងតិច 50px
+
+        if (diff > swipeThreshold) {
+          handleNextPage(); // អូសទៅឆ្វេង (ទៅទំព័របន្ទាប់)
+        } else if (diff < -swipeThreshold) {
+          handlePrevPage(); // អូសទៅស្តាំ (ទៅទំព័រមុន)
+        }
+        setTouchStartX(null); // Reset
+        setTouchEndX(null);
+      };
+
+      // --- Helper Functions (Formatting) ---
+      const formatKey = (key) => {
+        const result = key.replace(/([A-Z])/g, ' $1');
+        return result.charAt(0).toUpperCase() + result.slice(1);
+      };
+      const formatDisplayTime = (isoString) => {
+        if (!isoString || typeof isoString !== 'string') return '--:--'; // ប្រើ --:-- ជំនួស N/A
+        try {
+          return new Date(isoString).toLocaleString('en-US', { 
+            hour: '2-digit', minute: '2-digit', hour12: true 
+          });
+        } catch (e) { return isoString; }
+      };
+      const formatDisplayDate = (isoString) => {
+        if (!isoString || typeof isoString !== 'string') return 'N/A';
+        try {
+          return new Date(isoString).toLocaleDateString('en-GB', { 
+            day: 'numeric', month: 'short', year: 'numeric' 
+          });
+        } catch (e) { return isoString; }
+      };
+
+      // --- Render UI (JSX) ---
+      return (
+        <div className="flex flex-col items-center justify-start min-h-screen bg-gray-50 font-sans overflow-x-hidden">
+          
+          {/* Header Bar (រចនាបទថ្មី) */}
+          <div className={`w-full bg-gradient-to-r from-blue-600 to-indigo-700 shadow-lg sticky top-0 z-10 transition-all duration-700 ease-out transform ${
+              headerAnimated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-12'
+            }`}>
+            <div className="w-full max-w-3xl mx-auto p-5 flex flex-row items-center justify-center space-x-3">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-white opacity-90">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <h1 className="text-2xl font-bold text-white text-center">
+                និស្សិតចេញចូលម៉ោងការងារ
+              </h1>
+            </div>
+          </div>
+
+          {/* Main Content Area */}
+          <div className="w-full max-w-3xl mx-auto p-4 flex-grow">
+            
+            {error && (
+              <div className="p-4 my-4 text-center text-red-800 bg-red-100 rounded-lg shadow">
+                <span className="font-semibold">មានបញ្ហា៖</span> {error}
+              </div>
+            )}
+
+            {/* Card List Container (with swipe handlers) */}
+            <div 
+              className="space-y-3 card-container"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              {loading && (
+                <div className="flex justify-center items-center py-10">
+                  <svg className="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span className="ml-3 text-gray-600">កំពុងទាញយកទិន្នន័យ...</span>
+                </div>
+              )}
+              
+              {!loading && notes.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-10 text-center text-gray-500">
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-gray-400">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                  </svg>
+                  <h3 className="text-lg font-semibold mt-2">មិនទាន់មានទិន្នន័យ</h3>
+                  <p className="text-sm">មិនមានកំណត់ត្រាសម្រាប់ថ្ងៃបច្ចុប្បន្ននេះទេ។</p>
+                </div>
+              )}
+
+              {/* ប្រើ currentNotes ជំនួស notes */}
+              {!loading && currentNotes.map((note, index) => {
+                const { studentId, passNumber, checkInTime, checkOutTime, date, breakType } = note.data;
+                const otherData = { ...note.data };
+                // លុប field ដែលយើងបង្ហាញដោយឡែក
+                ['studentId', 'passNumber', 'checkInTime', 'checkOutTime', 'date', 'breakType'].forEach(k => delete otherData[k]);
+
+                return (
+                  <div
+                    key={note.id}
+                    className={`bg-white rounded-xl shadow-md overflow-hidden transition-all duration-500 ease-out transform hover:-translate-y-1 hover:shadow-xl ${
+                      cardsAnimated 
+                        ? 'opacity-100 translate-y-0 scale-100' 
+                        : 'opacity-0 translate-y-5 scale-95'
+                    }`}
+                    style={{ transitionDelay: `${index * 100}ms` }} // Animation ចូលម្តងមួយៗ
+                  >
+                    {/* Card Header (បកប្រែ) - បានបន្ថែម 'relative' */}
+                    <div className="p-4 bg-gray-50 border-b border-gray-200 relative">
+                      
+                      {/* Pass Number Badge (លេខកាត) - រចនាបទថ្មី */}
+                      {passNumber && (
+                        <div className="absolute top-4 right-4 flex items-center space-x-1.5 bg-blue-600 text-white px-3 py-1 rounded-full shadow-md text-xs font-bold">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 9H9.75M15 12H9.75M15 15H9.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+                          </svg>
+                          <span>{passNumber}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-shrink-0 p-2 bg-blue-100 rounded-full">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-blue-600">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-gray-500">លេខសម្គាល់និស្សិត</div>
+                          <div className="text-lg font-bold text-gray-900">{studentId || 'N/A'}</div>
+                        </div>
+                      </div>
+                      
+                      {/* បានដកកន្លែងបង្ហាញ PassNumber ចាស់ចេញពីទីនេះ */}
+                      
+                    </div>
+
+                    {/* === Card Body (រចនាឡើងវិញ និងប្តូរទីតាំង) === */}
+                    <div className="p-4">
+                      {/* ជួរទី 1: ម៉ោងចេញ និង ម៉ោងចូល */}
+                      <div className="flex justify-between items-center">
+                        
+                        {/* ម៉ោងចេញ (ឥឡូវនៅខាងឆ្វេង) */}
+                        <div className="flex items-center space-x-2">
+                          <div className="flex-shrink-0 p-2 bg-red-100 rounded-full">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-red-600">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m-3 0l3-3m0 0l-3-3m3 3H9" />
+                            </svg>
+                          </div>
+                          <div className="text-left">
+                            <div className="text-xs font-medium text-gray-500">ម៉ោងចេញ</div>
+                            <div className="text-base font-bold text-gray-900">{formatDisplayTime(checkOutTime)}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex-grow border-t-2 border-dotted border-gray-300 mx-3"></div>
+
+                        {/* ម៉ោងចូល (ឥឡូវនៅខាងស្តាំ) */}
+                        <div className="flex items-center space-x-2">
+                          <div className="text-right">
+                            <div className="text-xs font-medium text-gray-500">ម៉ោងចូល</div>
+                            <div className="text-base font-bold text-gray-900">{formatDisplayTime(checkInTime)}</div>
+                          </div>
+                          <div className="flex-shrink-0 p-2 bg-green-100 rounded-full">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-green-600">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M15.75 9l-2.25-2.25m0 0l-2.25 2.25M13.5 6.75v10.5" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ជួរទី 2: ព័ត៌មានបន្ទាប់បន្សំ */}
+                      <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100 text-xs">
+                        <div className="flex items-center space-x-2 text-gray-700">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-yellow-600 flex-shrink-0">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+                          </svg>
+                          <span className="capitalize">{breakType || 'N/A'}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-gray-500">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-indigo-500 flex-shrink-0">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                          </svg>
+                          <span>{formatDisplayDate(date)}</span>
+                        </div>
+                      </div>
+
+                      {/* ព័ត៌មានផ្សេងៗ (បើមាន) */}
+                      {Object.keys(otherData).length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-100 space-y-2 text-xs">
+                          {Object.entries(otherData).map(([key, value]) => (
+                            <div className="flex items-center space-x-2" key={key}>
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-gray-400 flex-shrink-0">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                              </svg>
+                              <div>
+                                <div className="font-medium text-gray-500">{formatKey(key)}</div>
+                                <div className="text-gray-900 break-words">{String(value)}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* --- Pagination Controls --- */}
+            {!loading && totalPages > 1 && (
+              <div className="flex items-center justify-between mt-6 select-none">
+                <button
+                  onClick={handlePrevPage}
+                  disabled={currentPage === 0}
+                  className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                  ថយក្រោយ
+                </button>
+                
+                <span className="text-sm font-medium text-gray-700">
+                  ទំព័រទី {currentPage + 1} នៃ {totalPages}
+                </span>
+
+                <button
+                  onClick={handleNextPage}
+                  disabled={currentPage >= totalPages - 1}
+                  className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  បន្ទាប់
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 ml-2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    // 7. បញ្ជូន App ទៅកាន់ 'root' div (v17 API)
+    ReactDOM.render(<App />, document.getElementById('root'));
+
+  </script>
+</body>
+</html>
+
