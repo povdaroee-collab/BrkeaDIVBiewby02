@@ -170,6 +170,7 @@
       const [auth, setAuth] = useState(null);
       const [userId, setUserId] = useState(null);
       const [isAuthReady, setIsAuthReady] = useState(false);
+      const [settingsRef, setSettingsRef] = useState(null); // (RE-ADDED)
 
       // App state
       const [notes, setNotes] = useState([]);
@@ -179,9 +180,9 @@
       // --- Page Navigation State ---
       const [page, setPage] = useState('list'); // 'list', 'details', 'settings'
 
-      // --- Settings State (UPDATED: Both personal) ---
-      const [showOnlyCheckout, setShowOnlyCheckout] = useState(false); // Personal filter
-      const [background, setBackground] = useState(backgroundOptions[0].class); // Personal background
+      // --- Settings State (UPDATED: Split Public/Personal) ---
+      const [publicSettings, setPublicSettings] = useState({ showOnlyCheckout: false }); // (RE-ADDED)
+      const [background, setBackground] = useState(backgroundOptions[0].class); // Personal
       
       // --- Modal State ---
       const [modalImage, setModalImage] = useState(null);
@@ -210,10 +211,8 @@
         } else {
           document.documentElement.classList.remove('dark');
         }
-
-        // Load personal filter from localStorage (NEW)
-        const savedShowOnlyCheckout = localStorage.getItem('showOnlyCheckout');
-        setShowOnlyCheckout(savedShowOnlyCheckout === 'true');
+        
+        // (REMOVED: Load personal filter from localStorage)
 
         try {
           if (!firebaseConfig.apiKey) throw new Error("Firebase config is missing.");
@@ -224,6 +223,7 @@
           
           setDb(dbInstance);
           setAuth(authInstance);
+          setSettingsRef(dbInstance.ref('app_settings')); // (RE-ADDED)
           
           setTimeout(() => setHeaderAnimated(true), 100); 
 
@@ -250,9 +250,9 @@
         }
       }, []);
 
-      // 2. Read Data from Realtime Database (UPDATED: Removed settings listener)
+      // 2. Read Data from Realtime Database (UPDATED: Added settings listener)
       useEffect(() => {
-        if (!isAuthReady || !db || !userId) return; 
+        if (!isAuthReady || !db || !userId || !settingsRef) return; 
 
         setLoading(true);
         setError(null);
@@ -295,10 +295,20 @@
 
         todayQuery.on('value', onValueCallback, onErrorCallback);
         
+        // --- (RE-ADDED) Listen for Public Settings ---
+        const onSettingsCallback = (snapshot) => {
+          const settings = snapshot.val();
+          if (settings) {
+            setPublicSettings({ showOnlyCheckout: settings.showOnlyCheckout === true });
+          }
+        };
+        settingsRef.on('value', onSettingsCallback);
+        
         return () => {
           todayQuery.off('value', onValueCallback);
+          settingsRef.off('value', onSettingsCallback); // (RE-ADDED)
         };
-      }, [db, userId, isAuthReady]); 
+      }, [db, userId, isAuthReady, settingsRef]); // (RE-ADDED settingsRef)
 
       // 3. Save Personal Background & Toggle Dark Mode (UPDATED)
       const handleBackgroundChange = (bgClass) => {
@@ -323,21 +333,27 @@
       }, [background]);
 
 
-      // --- Personal Setting Write Function (UPDATED) ---
+      // --- Public Setting Write Function (UPDATED) ---
       const handleFilterToggle = () => {
-        const newValue = !showOnlyCheckout;
-        localStorage.setItem('showOnlyCheckout', newValue); // Save to localStorage
-        setShowOnlyCheckout(newValue); // Update state
+        if (settingsRef) {
+          const newValue = !publicSettings.showOnlyCheckout;
+          settingsRef.child('showOnlyCheckout').set(newValue)
+            .catch(err => {
+              console.error("Failed to save setting:", err);
+              // Use alert because custom modal is complex here
+              alert("បរាជ័យក្នុងការរក្សាទុកការកំណត់! \nសូមប្រាកដថាអ្នកបាន Update Security Rules របស់អ្នក។");
+            });
+        }
       };
 
       // --- Filtered Notes Logic (for List Page) ---
       const filteredNotes = useMemo(() => {
-        if (!showOnlyCheckout) {
+        if (!publicSettings.showOnlyCheckout) { // (UPDATED: uses publicSettings)
           return notes; // If filter is off, return all notes
         }
         // If filter is on, return only notes WITHOUT a checkInTime
         return notes.filter(note => !note.data.checkInTime);
-      }, [notes, showOnlyCheckout]);
+      }, [notes, publicSettings.showOnlyCheckout]); // (UPDATED: uses publicSettings)
 
 
       // --- Pagination Logic (uses filteredNotes) ---
@@ -473,7 +489,13 @@
               
               {page === 'details' && <DetailsPage loading={loading} stats={stats} handleShareToTelegram={handleShareToTelegram} />}
               
-              {page === 'settings' && <SettingsPage showOnlyCheckout={showOnlyCheckout} onFilterToggle={handleFilterToggle} currentBackground={background} onBackgroundChange={handleBackgroundChange} />}
+              {/* (UPDATED) Pass publicSettings to SettingsPage */}
+              {page === 'settings' && <SettingsPage 
+                                        publicSettings={publicSettings} 
+                                        onFilterToggle={handleFilterToggle} 
+                                        currentBackground={background} 
+                                        onBackgroundChange={handleBackgroundChange} 
+                                      />}
 
             </div>
 
@@ -515,7 +537,7 @@
                   }`}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={page === 'settings' ? 2 : 1.5} stroke="currentColor" className="w-6 h-6">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-1.007 1.11-1.227l-.11.023c.554-.22 1.156-.22 1.71 0l.11-.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554.22 1.156.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554.22 1.156.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554.22 1.156.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023a8.25 8.25 0 00-2.4 0l.11.023a1.125 1.125 0 01-1.227 1.11l-.023-.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023-.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227 1.11l-.023-.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023-.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 000-2.4l.023.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11a8.25 8.25 0 000-2.4l.023.11C9.323 4.625 9.793 4.16 10.343 3.94zM12 15a3 3 0 100-6 3 3 0 000 6z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-1.007 1.11-1.227l-.11.023c.554-.22 1.156-.22 1.71 0l.11-.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554-.22 1.156-.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554-.22 1.156-.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023c.554-.22 1.156-.22 1.71 0l.11.023c.55.22 1.02.685 1.11 1.227l.11-.023a8.25 8.25 0 000 2.4l-.11.023a1.125 1.125 0 01-1.11 1.227l.11-.023a8.25 8.25 0 00-2.4 0l.11.023a1.125 1.125 0 01-1.227 1.11l-.023-.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023-.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227 1.11l-.023-.11a8.25 8.25 0 00-2.4 0l-.023.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 00-2.4 0l-.023-.11a1.125 1.125 0 01-1.227-1.11l-.023.11a8.25 8.25 0 000-2.4l.023.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11c-.22-.554-.22-1.156 0-1.71l.023-.11a1.125 1.125 0 011.11-1.227l-.023.11a8.25 8.25 0 000-2.4l.023.11C9.323 4.625 9.793 4.16 10.343 3.94zM12 15a3 3 0 100-6 3 3 0 000 6z" />
                   </svg>
                   <span className="text-xs font-medium mt-1">កំណត់ត្រា</span>
                 </button>
@@ -815,8 +837,8 @@
       );
     }
     
-    // --- Sub-Component: Settings Page (UPDATED: Merged into one box) ---
-    function SettingsPage({ showOnlyCheckout, onFilterToggle, currentBackground, onBackgroundChange }) {
+    // --- Sub-Component: Settings Page (UPDATED: Re-split Public/Personal) ---
+    function SettingsPage({ publicSettings, onFilterToggle, currentBackground, onBackgroundChange }) {
       
       const Switch = ({ label, description, enabled, onToggle }) => (
         <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
@@ -842,22 +864,29 @@
       return (
         <div className="space-y-6 animate-fade-in">
           
-          {/* Personal Settings */}
+          {/* Public Settings */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
             <div className="p-4 border-b dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">ការកំណត់ផ្ទាល់ខ្លួន</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">ការកំណត់ទាំងនេះ នឹងរក្សាទុកតែនៅលើឧបករណ៍របស់អ្នកប៉ុណ្ណោះ។</p>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">ការកំណត់សាធារណៈ (Public)</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">ការកំណត់នេះ នឹងរក្សាទុកនៅលើ Server ហើយប៉ះពាល់ដល់អ្នកប្រើប្រាស់ទាំងអស់។</p>
             </div>
             
             {/* Filter Setting */}
-            <div className="p-4 border-b dark:border-gray-700">
-              <h4 className="text-base font-medium text-gray-900 dark:text-white mb-3">ការបង្ហាញទិន្នន័យ</h4>
+            <div className="p-4">
               <Switch
                 label="បង្ហាញតែនិស្សិតនៅខាងក្រៅ"
                 description="បើកមុខងារនេះ ដើម្បីបង្ហាញតែនិស្សិតដែល Check Out (មិនទាន់ Check In) នៅលើទំព័រដើម។"
-                enabled={showOnlyCheckout}
+                enabled={publicSettings.showOnlyCheckout}
                 onToggle={onFilterToggle}
               />
+            </div>
+          </div>
+
+          {/* Personal Settings */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+            <div className="p-4 border-b dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">ការកំណត់ផ្ទាល់ខ្លួន (Personal)</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">ការកំណត់ទាំងនេះ នឹងរក្សាទុកតែនៅលើឧបករណ៍របស់អ្នកប៉ុណ្ណោះ។</p>
             </div>
 
             {/* Background Setting */}
